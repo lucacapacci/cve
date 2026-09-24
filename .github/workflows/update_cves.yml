@@ -68,14 +68,13 @@ jobs:
 
       - name: Process with Python
         run: |
-          # 2. Call your Python script. 
-          # It should read the *files.txt files in the current directory.
+          # 2. Call the Python script. 
           python3 update_cves.py
 
       - name: Cleanup and Commit
         run: |
           # 3. Delete the text files so they aren't added to the repo
-          rm -f *_files.txt
+          # rm -f *_files.txt
           
           # 4. Commit the new state
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
