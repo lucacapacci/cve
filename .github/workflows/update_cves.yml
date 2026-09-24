@@ -26,6 +26,7 @@ jobs:
             "lucacapacci/redhat_vex"
             "lucacapacci/pocs"
             "lucacapacci/cisa_kev"
+            "lucacapacci/epss"
           )
 
           # 1. Get last timestamp or default to 1 hour ago (ISO 8601 format)
