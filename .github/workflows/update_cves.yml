@@ -59,7 +59,14 @@ jobs:
             
             # Deduplicate the file list if any files were found
             if [ -f "${REPO_NAME}_files_temp.txt" ]; then
-              sort -u "${REPO_NAME}_files_temp.txt" > "${REPO_NAME}_files.txt"
+              if [ "$REPO_NAME" == "epss" ]; then
+                # Specific check for the epss repo: only track epss_scores.csv
+                if grep -q "^epss_scores.csv$" "${REPO_NAME}_files_temp.txt"; then
+                  echo "epss_scores.csv" > "${REPO_NAME}_files.txt"
+                fi
+              else
+                sort -u "${REPO_NAME}_files_temp.txt" > "${REPO_NAME}_files.txt"
+              fi
               rm "${REPO_NAME}_files_temp.txt"
             fi
           done
