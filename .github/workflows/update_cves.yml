@@ -37,36 +37,67 @@ jobs:
           
           for REPO_FULL in "${REPOS[@]}"; do
             REPO_NAME="${REPO_FULL#*/}"
-            echo "Checking $REPO_FULL for commits since $LAST_TIMESTAMP..."
             
-            # Fetch commits since the last timestamp
-            COMMITS_JSON=$(curl -s -H "Authorization: token $GH_TOKEN" \
-              "https://api.github.com/repos/$REPO_FULL/commits?since=$LAST_TIMESTAMP")
-            
-            # Extract all commit SHAs from the response
-            SHAS=$(echo "$COMMITS_JSON" | jq -r '.[].sha // empty')
-            
-            # Create an empty file so it exists even if there are no changes
-            touch "${REPO_NAME}_files.txt"
-            
-            for SHA in $SHAS; do
-              # The 'list commits' endpoint doesn't include file arrays, 
-              # so we must fetch each individual commit to extract file paths
-              curl -s -H "Authorization: token $GH_TOKEN" \
-                "https://api.github.com/repos/$REPO_FULL/commits/$SHA" | \
-                jq -r '.files[]? | select(.status != "removed") | .filename' >> "${REPO_NAME}_files_temp.txt"
-            done
-            
-            # Deduplicate the file list if any files were found
-            if [ -f "${REPO_NAME}_files_temp.txt" ]; then
-              if [ "$REPO_NAME" == "epss" ]; then
-                # Specific check for the epss repo: only track epss_scores.csv
-                if grep -q "^epss_scores.csv$" "${REPO_NAME}_files_temp.txt"; then
+            # --- EPSS STRATEGY: HASH COMPARISON ---
+            if [ "$REPO_NAME" == "epss" ]; then
+              echo "Checking $REPO_FULL via file hashing..."
+              
+              # Download the raw file using GitHub API
+              curl -sL -H "Authorization: token $GH_TOKEN" \
+                -H "Accept: application/vnd.github.v3.raw" \
+                "https://api.github.com/repos/$REPO_FULL/contents/epss_scores.csv" -o temp_epss.csv
+              
+              touch "${REPO_NAME}_files.txt"
+              
+              # If file downloaded successfully and is not empty
+              if [ -s temp_epss.csv ]; then
+                NEW_HASH=$(sha256sum temp_epss.csv | awk '{print $1}')
+                OLD_HASH=$(cat epss_hash.txt 2>/dev/null || echo "none")
+                
+                if [ "$NEW_HASH" != "$OLD_HASH" ]; then
+                  echo "epss_scores.csv hash changed! Updating files.txt"
                   echo "epss_scores.csv" > "${REPO_NAME}_files.txt"
+                  echo "$NEW_HASH" > epss_hash.txt
+                else
+                  echo "epss_scores.csv hash matched. No updates needed."
                 fi
               else
-                sort -u "${REPO_NAME}_files_temp.txt" > "${REPO_NAME}_files.txt"
+                echo "Failed to download epss_scores.csv"
               fi
+              
+              rm -f temp_epss.csv
+              continue # Skip the commit check logic for this repo
+            fi
+            
+            # --- NORMAL TIMESTAMPS STRATEGY FOR ALL OTHER REPOS (PAGINATED) ---
+            echo "Checking $REPO_FULL for commits since $LAST_TIMESTAMP..."
+            touch "${REPO_NAME}_files.txt"
+            
+            PAGE=1
+            while true; do
+              COMMITS_JSON=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                "https://api.github.com/repos/$REPO_FULL/commits?since=$LAST_TIMESTAMP&per_page=100&page=$PAGE")
+              
+              SHAS=$(echo "$COMMITS_JSON" | jq -r '.[].sha? // empty')
+              
+              # Break the loop if the current page returns no commits
+              if [ -z "$SHAS" ]; then
+                break
+              fi
+              
+              for SHA in $SHAS; do
+                curl -s -H "Authorization: token $GH_TOKEN" \
+                  "https://api.github.com/repos/$REPO_FULL/commits/$SHA" | \
+                  jq -r '.files[]? | select(.status != "removed") | .filename' >> "${REPO_NAME}_files_temp.txt"
+              done
+              
+              # Increment page and fetch the next 100 commits
+              PAGE=$((PAGE+1))
+            done
+            
+            # Deduplicate the file list
+            if [ -f "${REPO_NAME}_files_temp.txt" ]; then
+              sort -u "${REPO_NAME}_files_temp.txt" > "${REPO_NAME}_files.txt"
               rm "${REPO_NAME}_files_temp.txt"
             fi
           done
@@ -84,9 +115,9 @@ jobs:
           # 3. Delete the text files so they aren't added to the repo
           # rm -f *_files.txt
           
-          # 4. Commit the new state
+          # 4. Commit the new state (including epss_hash.txt if updated)
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add .
-          git commit -m "Sync: Processed repo changes via timestamp" || echo "No changes to commit"
+          git commit -m "Sync: Processed repo changes via timestamp and hashing" || echo "No changes to commit"
           git push
