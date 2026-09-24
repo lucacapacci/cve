@@ -1,0 +1,85 @@
+name: CVE Sync
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Fetch Changed Files via Timestamp
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPOS=(
+            "lucacapacci/nvd"
+            "lucacapacci/cvelistV5"
+            "lucacapacci/cve_news"
+            "lucacapacci/PoC-in-GitHub"
+            "lucacapacci/ghsa_cve"
+            "lucacapacci/redhat_vex"
+            "lucacapacci/pocs"
+            "lucacapacci/cisa_kev"
+          )
+
+          # 1. Get last timestamp or default to 1 hour ago (ISO 8601 format)
+          LAST_TIMESTAMP=$(cat last_sync_timestamp.txt 2>/dev/null || date -u -d "1 hour ago" +"%Y-%m-%dT%H:%M:%SZ")
+          
+          # Record current timestamp to save as the new state after processing
+          NEW_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          for REPO_FULL in "${REPOS[@]}"; do
+            REPO_NAME="${REPO_FULL#*/}"
+            echo "Checking $REPO_FULL for commits since $LAST_TIMESTAMP..."
+            
+            # Fetch commits since the last timestamp
+            COMMITS_JSON=$(curl -s -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO_FULL/commits?since=$LAST_TIMESTAMP")
+            
+            # Extract all commit SHAs from the response
+            SHAS=$(echo "$COMMITS_JSON" | jq -r '.[].sha // empty')
+            
+            # Create an empty file so it exists even if there are no changes
+            touch "${REPO_NAME}_files.txt"
+            
+            for SHA in $SHAS; do
+              # The 'list commits' endpoint doesn't include file arrays, 
+              # so we must fetch each individual commit to extract file paths
+              curl -s -H "Authorization: token $GH_TOKEN" \
+                "https://api.github.com/repos/$REPO_FULL/commits/$SHA" | \
+                jq -r '.files[]? | select(.status != "removed") | .filename' >> "${REPO_NAME}_files_temp.txt"
+            done
+            
+            # Deduplicate the file list if any files were found
+            if [ -f "${REPO_NAME}_files_temp.txt" ]; then
+              sort -u "${REPO_NAME}_files_temp.txt" > "${REPO_NAME}_files.txt"
+              rm "${REPO_NAME}_files_temp.txt"
+            fi
+          done
+          
+          # Update the timestamp state file
+          echo "$NEW_TIMESTAMP" > last_sync_timestamp.txt
+
+      - name: Process with Python
+        run: |
+          # 2. Call your Python script. 
+          # It should read the *files.txt files in the current directory.
+          python3 update_cves.py
+
+      - name: Cleanup and Commit
+        run: |
+          # 3. Delete the text files so they aren't added to the repo
+          rm -f *_files.txt
+          
+          # 4. Commit the new state and whatever your python script generated
+          git config user.name "github-actions[bot]"[cite: 1]
+          git config user.email "github-actions[bot]@users.noreply.github.com"[cite: 1]
+          git add .[cite: 1]
+          git commit -m "Sync: Processed repo changes via timestamp" || echo "No changes to commit"[cite: 1]
+          git push[cite: 1]
