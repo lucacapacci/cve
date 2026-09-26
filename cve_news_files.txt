@@ -1,10 +1,6 @@
-cves/2024/CVE-2024-7399.json
-cves/2025/CVE-2025-39964.json
-cves/2025/CVE-2025-4632.json
-cves/2026/CVE-2026-20079.json
-cves/2026/CVE-2026-31431.json
-cves/2026/CVE-2026-48842.json
+cves/2026/CVE-2026-56711.json
+cves/2026/CVE-2026-60004.json
 cves/2026/CVE-2026-65660.json
-cves/2026/CVE-2026-76460.json
-cves/2026/CVE-2026-76461.json
-news/2026/09/2026-09-25.json
+cves/2026/CVE-2026-73324.json
+cves/2026/CVE-2026-87902.json
+news/2026/09/2026-09-26.json
