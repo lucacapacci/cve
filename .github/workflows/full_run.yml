@@ -1,0 +1,88 @@
+name: Full CVE Build
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  initial-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          # Add any pip requirements needed for api_builder.py and process_local.py
+          pip install requests urllib3
+
+      - name: Download and Extract Data Repositories
+        run: |
+          mkdir -p repos
+          
+          REPOS=(
+            "nvd"
+            "cvelistV5"
+            "cve_news"
+            "PoC-in-GitHub"
+            "ghsa_cve"
+            "pocs"
+            "cisa_kev"
+            "epss"
+          )
+
+          for REPO in "${REPOS[@]}"; do
+            echo "Downloading ${REPO}..."
+            curl -sL "https://github.com/lucacapacci/${REPO}/archive/refs/heads/main.zip" -o "${REPO}.zip"
+            
+            echo "Extracting ${REPO}..."
+            unzip -q "${REPO}.zip"
+            
+            # GitHub archives are extracted as repo-branch (e.g., nvd-main). 
+            # Rename them to strictly match the expected paths in process_local.py.
+            mv "${REPO}-main" "repos/${REPO}"
+            rm "${REPO}.zip"
+          done
+
+      - name: Extract Unique CVE IDs
+        run: |
+          # 1. Find all files in the repos/ directory.
+          # 2. Extract just the filename.
+          # 3. Filter for valid CVE json or csv files.
+          # 4. Strip the extension.
+          # 5. Convert to uppercase and output unique IDs.
+          find repos/ -type f -name "*.*" | \
+            awk -F'/' '{print $NF}' | \
+            grep -iE '^CVE-[0-9]{4}-[0-9]{4,}\.(json|csv)$' | \
+            sed -E 's/\.(json|csv)$//i' | \
+            tr '[:lower:]' '[:upper:]' | \
+            sort -u > all_cves.txt
+            
+          echo "Total unique CVEs identified: $(wc -l < all_cves.txt)"
+
+      - name: Process Local Data
+        run: |
+          # Calls process_local.py which reads from all_cves.txt and references the ./repos folder
+          python3 process_local.py
+
+      - name: Cleanup and Commit Initial Data
+        run: |
+          # Remove raw repository data and temporary text file so they are not committed
+          rm -rf repos/
+          rm all_cves.txt
+          
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Initialize baseline sync timestamp mimicking the logic in update_cves.yml
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > last_sync_timestamp.txt
+          
+          git add .
+          git commit -m "feat: Initial full CVE build"
+          git push
