@@ -75,6 +75,7 @@ jobs:
         run: |
           # Remove raw repository data and temporary text file so they are not committed
           rm -rf repos/
+          rm -rf __pycache__/
           rm all_cves.txt
           
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
