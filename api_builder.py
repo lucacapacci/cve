@@ -175,7 +175,7 @@ def fetch_text(url: str) -> Optional[str]:
 # =============================================================================
 
 DEFAULT_BASE_REPOS = "https://lucacapacci.github.io"
-DEFAULT_BASE_RH = "https://raw.githubusercontent.com/lucacapacci/redhat_vex/refs/heads/main"
+DEFAULT_BASE_RH = "https://raw.githubusercontent.com/lucacapacci/redhat_vex_feed/refs/heads/main"
 DESCRIPTION_PLACEHOLDER = "Description not available."
 JUNK_PRODUCTS = ('n/a', 'unknown', 'n/a n/a', '*', '')
 
@@ -231,7 +231,7 @@ def save_cve_data(data: dict, path: str) -> bool:
     tmp_path = f"{path}.tmp"
     try:
         with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
+            json.dump(data, f)
         os.replace(tmp_path, path)
         return True
     except (OSError, TypeError, ValueError) as e:
@@ -776,7 +776,7 @@ def process_cve(
     if not cve_title:
         for adp in ((cve_project_res or {}).get("containers") or {}).get("adp", []):
             adp_title = adp.get("title", None)
-            if adp_title and adp_title != "CVE Program Container":
+            if adp_title and adp_title.lower().strip() not in ["cve program container", "cisa adp vulnrichment"]:
                 cve_title = adp_title
                 break
             
@@ -1254,7 +1254,7 @@ def process_cve(
     if cve_project_res and "cveMetadata" in cve_project_res and "datePublished" in cve_project_res["cveMetadata"]:
         cvelist_pub_date = cve_project_res["cveMetadata"]["datePublished"].split('T')[0]
 
-    vuln_status = cve.get("vulnStatus", "N/A")
+    vuln_status = cve_project_res.get("cveMetadata", {}).get("state", "N/A") if cve_project_res else "N/A"
 
     # News
     articles = extract_news(news_res)
@@ -1292,7 +1292,7 @@ def process_cve(
         "news": articles
     }
     
-    return json.dumps(result, indent=4)
+    return json.dumps(result)
 
 
 def update_epss(cve_id: str, epss_score: str, percentile: str, parent_dir: str) -> None:
@@ -1307,7 +1307,9 @@ def update_epss(cve_id: str, epss_score: str, percentile: str, parent_dir: str) 
     if not os.path.exists(file_path):
         print(f"File not found, creating it: {file_path}")
         cve_json = process_cve(cve_id)
-        save_cve(cve_id, cve_json)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(cve_json)
         return
         
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -1379,36 +1381,13 @@ def fetch_and_process_daily_epss(parent_dir: str) -> None:
     current_data = parse_epss_csv(current_csv)
     prev_data = parse_epss_csv(prev_csv)
     
-    # 4. Find CVEs in the current dataset but not in the previous one
-    new_cves = {cve: scores for cve, scores in current_data.items() if cve not in prev_data}
+    # 4. Find CVEs that are new or have updated scores/percentiles
+    changed_cves = {
+        cve: scores for cve, scores in current_data.items() 
+        if cve not in prev_data or current_data[cve] != prev_data[cve]
+    }
     
-    print(f"Found {len(new_cves)} new CVEs in the latest EPSS data.")
+    print(f"Found {len(changed_cves)} updated CVEs in the latest EPSS data.")
     
-    for cve_id, (epss_score, percentile) in new_cves.items():
+    for cve_id, (epss_score, percentile) in changed_cves.items():
         update_epss(cve_id, epss_score, percentile, parent_dir)
-
-
-if __name__ == "__main__":
-    import os
-    cve_id = "CVE-2026-96512"  # "CVE-2021-44228"  # Log4Shell
-    
-    print("--- 1. Testing Remote Fetch ---")
-    remote_json = process_cve(cve_id)
-    print(f"Remote output length: {len(remote_json)} chars")
-    print(remote_json)
-    exit()
-    
-    print("\n--- 2. Testing Local Directory Fetch ---")
-    # Setup a dummy local directory structure mirroring the repo
-    local_repos_copy = "repos"
-    local_rh = f"{local_repos_copy}/redhat_vex"
-    
-    local_json = process_cve(
-        cve_id, 
-        base_repos=local_repos_copy, 
-        base_rh=local_rh
-    )
-    
-    parsed_local = json.loads(local_json)
-    print(f"Local output length: {len(local_json)} chars")
-    print(f"Mocked Description from Local File: {parsed_local.get('description')}")
