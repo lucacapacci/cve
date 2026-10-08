@@ -114,6 +114,7 @@ jobs:
         run: |
           # 3. Delete the text files so they aren't added to the repo
           rm -f *_files.txt
+          rm -rf __pycache__/
           
           # 4. Commit the new state (including epss_hash.txt if updated)
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
